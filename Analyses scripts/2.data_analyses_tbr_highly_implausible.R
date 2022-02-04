@@ -1,0 +1,100 @@
+##Is Earth a Perfect Square? Repetition Increases the Perceived Truth of Highly Implausible Statements
+#Pre-registration here: https://osf.io/pe4g9/
+##Descriptive and inferential statistics
+##Script by: Jeremy Bena and Doris Lacassagne
+
+#clear out the environment if needed
+rm(list=ls())
+
+#Call (or install and call) packages we will use
+library(pacman) 
+p_load('tidyverse', 'psych', 'effsize', 'BayesFactor', 'ggpubr', 'rcompanion') 
+
+#read the data file
+data_test_final = read.csv("data/data_analyses_tbr_highly_implausible.csv")
+
+#Aggregate truth responses by participant*repetition condition (=464 observations, 232 ppts*2 levels)
+rep_agg = data_test_final %>% 
+  group_by(repetition, url.srid) %>% 
+  summarise(mean_truth = mean(slider_truth_response)) #compute a mean perceived truth value for repeated and new statements for each participant
+
+#tell R Repetition is a factor
+rep_agg$repetition = as.factor(rep_agg$repetition)
+
+#For other analyses, aggregate truth responses by participant*repetition*counterbalancing
+rep_agg_cb = data_test_final %>% 
+  group_by(repetition, condition, url.srid) %>% 
+  summarise(mean_truth = mean(slider_truth_response)) 
+rep_agg_cb$repetition = as.factor(rep_agg_cb$repetition)
+
+#We can have a wide data frame if needed (useful to compute a truth effect score for each participant - truth rep - truth new)
+data_wide = rep_agg %>% pivot_wider(names_from = repetition
+                                    ,values_from = mean_truth)
+
+#compute a truth effect score
+data_wide$te_score = data_wide$repeated-data_wide$new
+
+#Mean perceived truth as a function of Repetition
+describeBy(rep_agg$mean_truth, rep_agg$repetition)
+
+#we can see if ppts show an effect in the expected direction or not (null or negative)
+#if ppt's te > 0: 1, else, 0
+data_wide$te_score_cat = ifelse(data_wide$te_score > 0, 1, 0)
+#more fine-grained: truth effect scores can be positive, null, or negative
+data_wide$te_score_cat2 = ifelse(data_wide$te_score > 0, "positive", 
+                                ifelse(data_wide$te_score < 0, "negative", "null"))
+
+#tell R url.srid (used to identify participants is a factor)
+data_wide$url.srid = as.factor(data_wide$url.srid)
+
+#Distribution of mean perceived truth for repeated - for new statements normal? 
+shapiro.test(data_wide$te_score) #NO...
+#but density plot suggests it is still fine (see Figure 1B in the manuscript)
+plot(density(data_wide$te_score))
+#We preregistered a Wilcoxon signed-rank test if distribution =/= normal; paired samples frequentist and default Bayes t-test if == normal. We did both
+
+#TESTS
+#Paired samples t-test on mean perceived truth as a function of Repetition
+t.test(rep_agg$mean_truth~rep_agg$repetition, paired=TRUE) #significant result
+
+#Associated effect size
+cohen.d(rep_agg$mean_truth,rep_agg$repetition, paired=TRUE)
+
+#Descriptive results
+describeBy(rep_agg$mean_truth,rep_agg$repetition)
+
+#paired samples default Bayes t test (cauchy prior = .707)
+data_wide = as.data.frame(data_wide)
+ttestBF(x = data_wide$new, y = data_wide$repeated, paired = TRUE
+        ,rscale = sqrt(2)/2) #BF10 > 1000
+
+#We preregistered a non-parametric test if significant Shapiro-Wilk: we use a Wilcoxon signed-rank test
+wilcox.test(data_wide$repeated, data_wide$new, paired = TRUE, correct = FALSE) #significant result
+
+#Find the Z statistic
+wilcoxonZ(data_wide$repeated, data_wide$new, paired = TRUE)
+
+#Compute the effect size as the product biserial correlation (r_pb): Z/sqrt(n_repeated+n_new)
+wilcoxonZ(data_wide$repeated, data_wide$new, paired = TRUE)/sqrt((length(data_wide$repeated)+length(data_wide$new)))
+
+##Additional, non-preregistered analyses
+#Mixed ANOVA 2 (repetition, within) x 2 (counterbalancing, between) on perceived truth
+mod_cb = afex::aov_ez(rep_agg_cb
+                    ,id = "url.srid"
+                    ,dv = "mean_truth"
+                    ,within = "repetition"
+                    ,between = "condition"
+                    )
+mod_cb  #only the effect of repetition is significant, no main effect of counterbalancing nor two-way interaction
+
+#Individual differences between participants: evidence for a reverse truth effect for participants with a truth effect score below 0?
+#in the te_score < 0 group, check if the effect is significantly different from 0
+t.test(data_wide$te_score[data_wide$te_score_cat2=="negative"], mu = 0) #significant result
+lsr::cohensD(data_wide$te_score[data_wide$te_score_cat2=="negative"], mu = 0) #associated effect size
+
+#descriptively
+describeBy(data_wide$te_score, data_wide$te_score_cat2)
+
+#Mean truth ratings for repeated and new statements in each "truth effect" group
+describeBy(data_wide$new, data_wide$te_score_cat2)
+describeBy(data_wide$repeated, data_wide$te_score_cat2)

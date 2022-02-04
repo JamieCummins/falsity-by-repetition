@@ -1,0 +1,252 @@
+---
+title: "processing"
+author: "Jamie Cummins"
+date: "2/2/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+
+```{r}
+
+library(tidyverse)
+library(psych) # not clear why psych is loaded in this script
+
+raw_df <- read_csv("raw/data.csv")
+
+```
+
+# exclude unserious responses
+
+```{r}
+
+included_participants <- raw_df %>% 
+  filter(serious == 1) %>%
+  pull(unique_id)
+
+raw_exclusions_applied_df <- raw_df %>% 
+  filter(unique_id %in% included_participants) 
+
+```
+
+# Retrieve the statements ppts saw in the exposure phase and keep only the variables of interest
+
+```{r}
+
+exposed_statements_df <- raw_exclusions_applied_df %>% 
+  filter(sender == "interest_judgment" & count_exposure_trial < 8) %>%
+  select(unique_id, condition, sender, response, statement_exposure, count_exposure_trial, serious)
+
+```
+
+#Identify which are the repeated statements in each counterbalancing condition
+
+```{r}
+
+condition <- raw_df %>%
+  select(unique_id, condition, statement_exposure) %>%
+  filter(!is.na(condition) | !is.na(statement_exposure)) %>%
+  fill(condition)
+
+old_a <- condition %>% 
+  filter(condition == "A") %>%
+  pull(statement_exposure)
+
+old_b <- condition %>% 
+  filter(condition == "B") %>%
+  pull(statement_exposure)
+
+```
+
+# Retrieve the statements and responses from the test phase, and keep only the variables of interest
+
+```{r}
+
+full_df <- raw_exclusions_applied_df %>% 
+  filter(sender == "slider_trial") %>%
+  select(-condition) %>%
+  left_join(condition) %>%
+  select(unique_id, condition, sender, statement_test, count_test_trial, slider_truth_response, serious) %>%
+  mutate(repetition = case_when(condition == "A" & statement_test %in% old_a ~ "repeated",
+                                condition == "B" & statement_test %in% old_b ~ "repeated",
+                                TRUE ~ "new"),
+         slider_truth_response = as.numeric(slider_truth_response))
+
+```
+
+#Rescale responses on the slider: rather than -50;50, use 0;100
+## this bit of code below was in the original processing script, but doesn't do anything...
+
+```{r}
+
+# data_test_final$slider_truth_response = data_test_final$slider_truth_response
+
+```
+
+#write the data frame
+
+```{r}
+
+write.csv(full_df, "processed/processed.csv")
+
+```
+
+
+
+# The commented-out code below was used to extract the SQL data into R from labjs
+
+<!-- # Converting SQL data -->
+
+<!-- Establish SQL connection and extract main table: -->
+
+<!-- ```{r} -->
+
+<!-- # Establish SQL connection -->
+<!-- con <- -->
+<!--   dbConnect(drv = RSQLite::SQLite(), -->
+<!--             dbname = 'raw/data.sqlite') -->
+
+<!-- # Extract main table -->
+<!-- d <- -->
+<!--   dbGetQuery(conn = con, -->
+<!--              statement = 'SELECT * FROM labjs') -->
+
+<!-- # Close and discard connection -->
+<!-- dbDisconnect(conn = con) -->
+<!-- rm(con) -->
+
+<!-- ``` -->
+
+<!-- * id: row number -->
+<!-- * session: generated identifier for each individual session (one per participant) -->
+<!-- * timestamp -->
+<!-- * url -->
+<!-- * metadata: also includes a variable "id" which corresponds to individual sessions -->
+<!-- * data: the actual data -->
+
+<!-- Process metadata and combine with the rest: -->
+
+<!-- ```{r} -->
+
+<!-- d.meta <- -->
+<!--   map_dfr(d$metadata, fromJSON) %>% # apply JSON function to the metadata -->
+<!--   dplyr::rename(unique_id = id) # rename to avoid confusion -->
+
+<!-- d <- d %>% -->
+<!--   bind_cols(d.meta) %>% -->
+<!--   select(-metadata) -->
+
+<!-- ``` -->
+
+<!-- * slice: the number of the entry for that specific subject -->
+<!-- * observation: what we will use as subject identifier -->
+<!-- * payload: tells you whether the data are complete (full) or not (incremental) -->
+
+<!-- See by how much subject identifiers can be shortened: -->
+
+<!-- ```{r} -->
+
+<!-- count_unique <- function(x) { -->
+<!--   return(length(unique(x))) -->
+<!-- } -->
+<!-- # returns how many unique observations there are in a given vector -->
+
+<!-- information_preserved <- function(x, length) { -->
+<!--   return(count_unique(str_sub(x, end = i)) == count_unique(x)) -->
+<!-- } -->
+<!-- # put in a vector and a string length -->
+<!-- # for that string length, the vector checks how many unique observations there are when the strings are truncated using that length -->
+<!-- # the function then compares this number to the number of unique observations when at full string length -->
+<!-- # if this number is the same (i.e., truncating the string doesn't change the number of unique observations) it returns TRUE -->
+
+<!-- for (i in 5:36) { -->
+<!--   if ( -->
+<!--     information_preserved(d$session, i) && -->
+<!--     information_preserved(d$observation, i) -->
+<!--   ) { -->
+<!--     break() -->
+<!--   } -->
+<!-- } -->
+<!-- # check if more than five characters are needed to preserve the identifying information -->
+<!-- # for-loop breaks as soon as both expressions are evaluated as TRUE -->
+
+<!-- ``` -->
+
+<!-- Truncate ID strings to five characters: -->
+
+<!-- ```{r} -->
+
+<!-- # Truncate IDs -->
+<!-- d <- d %>% -->
+<!--   dplyr::mutate(session = str_sub(session, end = i), -->
+<!--                 unique_id = str_sub(unique_id, end = i)) -->
+
+<!-- ``` -->
+
+<!-- Extract the actual data: -->
+
+<!-- ```{r} -->
+
+<!-- # Create function that does this -->
+<!-- parseJSON <- function(input) { -->
+<!--   return(input %>% -->
+<!--            fromJSON(flatten = TRUE) %>% { -->
+<!--              if (class(.) == 'list') {discard(., is.null) %>% as_tibble()} -->
+<!--              else {.} -->
+<!--              } %>% -->
+<!--            janitor::clean_names() %>% -->
+<!--            mutate_all(as.character)) -->
+<!-- } -->
+
+<!-- # Get full data -->
+<!-- d.full <- d %>% -->
+<!--   dplyr::filter(payload == 'full') %>% -->
+<!--   group_by(unique_id, id) %>% -->
+<!--   do({map_dfr(.$data, parseJSON)} %>% -->
+<!--        bind_rows()) %>% -->
+<!--   ungroup() %>% -->
+<!--   select(-id) -->
+
+<!-- ``` -->
+
+<!-- Get incremental data (in case the full data are not available). -->
+
+<!-- ```{r} -->
+
+<!-- d.incremental <- -->
+<!--   d %>% -->
+<!--   dplyr::filter(payload %in% c('incremental', 'latest')) %>% -->
+<!--   group_by(unique_id, id) %>% -->
+<!--   do( -->
+<!--     {map_dfr(.$data, parseJSON)} %>% -->
+<!--       bind_rows() -->
+<!--   ) %>% -->
+<!--   ungroup() %>% -->
+<!--   select(-id) -->
+
+<!-- # merge data sets -->
+<!-- d.output <- -->
+<!--   d.full %>% -->
+<!--   bind_rows(d.incremental %>% filter(!(unique_id %in% d.full$unique_id))) -->
+
+<!-- # %>% -->
+<!-- #   type_convert() -->
+
+<!-- full_raw_data_df <- d.output -->
+
+<!-- ``` -->
+
+<!-- # write out and save csvs -->
+
+<!-- ```{r} -->
+
+<!-- write_csv(full_raw_data_df, "raw/data.csv") -->
+
+<!-- ``` -->
+
+
